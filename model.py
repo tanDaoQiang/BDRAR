@@ -2,9 +2,9 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
-from resnext import ResNeXt101
+from resnext.resnext101_regular import ResNeXt101
 
-
+##注意力模型
 class _AttentionModule(nn.Module):
     def __init__(self):
         super(_AttentionModule, self).__init__()
@@ -37,13 +37,14 @@ class _AttentionModule(nn.Module):
 class BDRAR(nn.Module):
     def __init__(self):
         super(BDRAR, self).__init__()
+        ##resnext提取不同分辨率的特征
         resnext = ResNeXt101()
         self.layer0 = resnext.layer0
         self.layer1 = resnext.layer1
         self.layer2 = resnext.layer2
         self.layer3 = resnext.layer3
         self.layer4 = resnext.layer4
-
+        #统一resnext通道数
         self.down4 = nn.Sequential(
             nn.Conv2d(2048, 32, 1, bias=False), nn.BatchNorm2d(32), nn.ReLU()
         )
@@ -95,11 +96,13 @@ class BDRAR(nn.Module):
         self.attention3_lh = _AttentionModule()
         self.attention4_lh = _AttentionModule()
 
+        #注意力融合
         self.fuse_attention = nn.Sequential(
             nn.Conv2d(64, 16, 3, padding=1, bias=False), nn.BatchNorm2d(16), nn.ReLU(),
             nn.Conv2d(16, 2, 1)
         )
 
+        #
         self.predict = nn.Sequential(
             nn.Conv2d(32, 8, 3, padding=1, bias=False), nn.BatchNorm2d(8), nn.ReLU(),
             nn.Dropout(0.1), nn.Conv2d(8, 1, 1)
@@ -107,7 +110,7 @@ class BDRAR(nn.Module):
 
         for m in self.modules():
             if isinstance(m, nn.ReLU) or isinstance(m, nn.Dropout):
-                m.inplace = True
+                m.inplace = False
 
     def forward(self, x):
         layer0 = self.layer0(x)
@@ -121,11 +124,23 @@ class BDRAR(nn.Module):
         down2 = self.down2(layer2)
         down1 = self.down1(layer1)
 
+    ##下分支 down4-down1的RAR refine1_hl_1
+        ##每个都是两层RAR
+        #上采样 把down4变成down3大小 [m : ] 代表列表中的第m+1项到最后一项
         down4 = F.upsample(down4, size=down3.size()[2:], mode='bilinear')
+        #cat(1) 横向拼接 [down4,down3] cat(0) 纵向拼接[[down4],[down3]] channel=64
+        #Fres refine3_hl  残差模块 Residual
         refine3_hl_0 = F.relu(self.refine3_hl(torch.cat((down4, down3), 1)) + down4, True)
+            #refine3_hl
+            #Conv2d(64, 32, 1, bias=False), nn.BatchNorm2d(32), nn.ReLU(),
+            #Conv2d(32, 32, 3, padding=1, groups=32, bias=False), nn.BatchNorm2d(32), nn.ReLU(),
+            #Conv2d(32, 32, 1, bias=False), nn.BatchNorm2d(32))
+        #Fres * attention  第一层结果
         refine3_hl_0 = (1 + self.attention3_hl(torch.cat((down4, down3), 1))) * refine3_hl_0
-        refine3_hl_1 = F.relu(self.refine3_hl(torch.cat((refine3_hl_0, down3), 1)) + refine3_hl_0, True)
+        #再将第一层结果做输入
+        refine3_hl_1 = F.relu(self  .refine3_hl(torch.cat((refine3_hl_0, down3), 1)) + refine3_hl_0, True)
         refine3_hl_1 = (1 + self.attention3_hl(torch.cat((refine3_hl_0, down3), 1))) * refine3_hl_1
+        ##每个都是两层RAR两层RAR
 
         refine3_hl_1 = F.upsample(refine3_hl_1, size=down2.size()[2:], mode='bilinear')
         refine2_hl_0 = F.relu(self.refine2_hl(torch.cat((refine3_hl_1, down2), 1)) + refine3_hl_1, True)
@@ -138,7 +153,9 @@ class BDRAR(nn.Module):
         refine1_hl_0 = (1 + self.attention1_hl(torch.cat((refine2_hl_1, down1), 1))) * refine1_hl_0
         refine1_hl_1 = F.relu(self.refine1_hl(torch.cat((refine1_hl_0, down1), 1)) + refine1_hl_0, True)
         refine1_hl_1 = (1 + self.attention1_hl(torch.cat((refine1_hl_0, down1), 1))) * refine1_hl_1
+    ##下分支 down4-down1的RAR refine1_hl_1
 
+    #上分支 down1-down4的RAR refine4_lh_1
         down2 = F.upsample(down2, size=down1.size()[2:], mode='bilinear')
         refine2_lh_0 = F.relu(self.refine2_lh(torch.cat((down1, down2), 1)) + down1, True)
         refine2_lh_0 = (1 + self.attention2_lh(torch.cat((down1, down2), 1))) * refine2_lh_0
@@ -156,6 +173,7 @@ class BDRAR(nn.Module):
         refine4_lh_0 = (1 + self.attention4_lh(torch.cat((refine3_lh_1, down4), 1))) * refine4_lh_0
         refine4_lh_1 = F.relu(self.refine4_lh(torch.cat((refine4_lh_0, down4), 1)) + refine4_lh_0, True)
         refine4_lh_1 = (1 + self.attention4_lh(torch.cat((refine4_lh_0, down4), 1))) * refine4_lh_1
+    #上分支 down1-down4的RAR refine4_lh_1
 
         refine3_hl_1 = F.upsample(refine3_hl_1, size=down1.size()[2:], mode='bilinear')
         predict4_hl = self.predict(down4)
@@ -168,7 +186,9 @@ class BDRAR(nn.Module):
         predict3_lh = self.predict(refine3_lh_1)
         predict4_lh = self.predict(refine4_lh_1)
 
+    #特征融合
         fuse_attention = F.sigmoid(self.fuse_attention(torch.cat((refine1_hl_1, refine4_lh_1), 1)))
+        #torch.sum(x, 0)按列求和  torch.sum(x, 1)按行求和
         fuse_predict = torch.sum(fuse_attention * torch.cat((predict1_hl, predict4_lh), 1), 1, True)
 
         predict4_hl = F.upsample(predict4_hl, size=x.size()[2:], mode='bilinear')

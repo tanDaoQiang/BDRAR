@@ -13,7 +13,7 @@ class Compose(object):
             img, mask = t(img, mask)
         return img, mask
 
-
+#随机水平翻转
 class RandomHorizontallyFlip(object):
     def __call__(self, img, mask):
         if random.random() < 0.5:

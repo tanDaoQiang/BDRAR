@@ -15,10 +15,10 @@ torch.cuda.set_device(0)
 ckpt_path = './ckpt'
 exp_name = 'BDRAR'
 args = {
-    'snapshot': '3000',
+    'snapshot': '801',
     'scale': 416
 }
-
+#图片裁剪416
 img_transform = transforms.Compose([
     transforms.Resize(args['scale']),
     transforms.ToTensor(),
@@ -26,7 +26,7 @@ img_transform = transforms.Compose([
 ])
 
 to_test = {'sbu': sbu_testing_root}
-
+#转图像
 to_pil = transforms.ToPILImage()
 
 
@@ -34,16 +34,18 @@ def main():
     net = BDRAR().cuda()
 
     if len(args['snapshot']) > 0:
-        print 'load snapshot \'%s\' for testing' % args['snapshot']
+        ##print 'load snapshot \'%s\' for testing' % args['snapshot']
+        #加载模型
         net.load_state_dict(torch.load(os.path.join(ckpt_path, exp_name, args['snapshot'] + '.pth')))
 
     net.eval()
+
     with torch.no_grad():
-        for name, root in to_test.iteritems():
+        for name, root in to_test.items():
             img_list = [img_name for img_name in os.listdir(os.path.join(root, 'ShadowImages')) if
                         img_name.endswith('.jpg')]
             for idx, img_name in enumerate(img_list):
-                print 'predicting for %s: %d / %d' % (name, idx + 1, len(img_list))
+                ##print 'predicting for %s: %d / %d' % (name, idx + 1, len(img_list))
                 check_mkdir(
                     os.path.join(ckpt_path, exp_name, '(%s) %s_prediction_%s' % (exp_name, name, args['snapshot'])))
                 img = Image.open(os.path.join(root, 'ShadowImages', img_name))

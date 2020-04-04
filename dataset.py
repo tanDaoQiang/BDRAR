@@ -11,7 +11,7 @@ def make_dataset(root):
         (os.path.join(root, 'ShadowImages', img_name + '.jpg'), os.path.join(root, 'ShadowMasks', img_name + '.png'))
         for img_name in img_list]
 
-
+#
 class ImageFolder(data.Dataset):
     def __init__(self, root, joint_transform=None, transform=None, target_transform=None):
         self.root = root
